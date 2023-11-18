@@ -152,6 +152,12 @@ static constexpr struct pass_data afl_pass_data = {
 
 };
 
+struct basic_block_node {
+    basic_block bb;
+    bool visited;
+    unsigned src_bid;
+};
+
 struct afl_pass : afl_base_pass {
 
   afl_pass(bool quiet, unsigned int ratio)
@@ -163,7 +169,8 @@ struct afl_pass : afl_base_pass {
         out_of_line(getenv("AFL_GCC_OUT_OF_LINE")),
 #endif
         neverZero(!getenv("AFL_GCC_SKIP_NEVERZERO")),
-        inst_blocks(0) {
+        inst_blocks(0),
+        inst_edges(0) {
 
     initInstrumentList();
 
@@ -181,6 +188,7 @@ struct afl_pass : afl_base_pass {
 
   /* Count instrumented blocks. */
   unsigned int inst_blocks;
+  unsigned int inst_edges;
 
   virtual unsigned int execute(function *fn) {
 
@@ -194,6 +202,7 @@ struct afl_pass : afl_base_pass {
          cntr = NULL, xaddc = NULL, xincr = NULL;
 
     basic_block bb;
+    std::map<basic_block, unsigned> bidMap;
     FOR_EACH_BB_FN(bb, fn) {
 
       if (!instrument_block_p(bb)) continue;
@@ -201,6 +210,7 @@ struct afl_pass : afl_base_pass {
       /* Generate the block identifier.  */
       unsigned bid = R(MAP_SIZE);
       tree     bidt = build_int_cst(sizetype, bid);
+      bidMap[bb] = bid;
 
       gimple_seq seq = NULL;
 
@@ -333,9 +343,10 @@ struct afl_pass : afl_base_pass {
       gimple_stmt_iterator insp = gsi_after_labels(bb);
       gsi_insert_seq_before(&insp, seq, GSI_SAME_STMT);
 
+      //OKF("  [%02d] Instrumented %02u bb", blocks, bid);
+
       /* Bump this function's instrumented block counter.  */
       blocks++;
-
     }
 
     /* Aggregate the instrumented block count.  */
@@ -359,6 +370,11 @@ struct afl_pass : afl_base_pass {
       edge e = single_succ_edge(ENTRY_BLOCK_PTR_FOR_FN(fn));
       gsi_insert_seq_on_edge_immediate(e, seq);
 
+      //std::set<unsigned> eidSet;
+      //inst_edges += count_edge_from_block(bidMap,
+      //          ENTRY_BLOCK_PTR_FOR_FN(fn));
+
+      inst_edges += count_edge_from_func(bidMap, fn);
     }
 
     return 0;
@@ -380,6 +396,127 @@ struct afl_pass : afl_base_pass {
     return false;
 
   }
+
+  int count_edge_from_func(std::map<basic_block, unsigned> &m,
+          function *fn) {
+    int cnt = 0;
+    basic_block bb;
+    edge          e, es;
+    edge_iterator ei, esi;
+    std::set<unsigned> eidSet;
+
+    FOR_EACH_BB_FN(bb, fn) {
+      if (m.count(bb) == 0) continue;
+      std::queue<edge> succs;
+      FOR_EACH_EDGE(e, ei, bb->succs)
+        succs.push(e);
+
+      while (succs.size() > 0) {
+        e = succs.front();
+        succs.pop();
+        if (m.count(e->dest) == 0) {
+            // skip this bb and get succs!
+            FOR_EACH_EDGE(es, esi, e->dest->succs) {
+                succs.push(es);
+            }
+            continue;
+
+        } else if (m.count(bb) > 0) {
+            unsigned eid = (m[bb] >> 1) ^ m[e->dest];
+            if (eidSet.count(eid) == 0) {
+                eidSet.insert(eid);
+                //OKF("    Has edge %02u -> %02u", m[root], m[e->dest]);
+                cnt++;
+            }
+        }
+      }
+    }
+    return cnt;
+  }
+
+  int count_edge_from_block(std::map<basic_block, unsigned> &m,
+          basic_block br) {
+    int cnt = 0;
+    edge          e, es;
+    edge_iterator ei, esi;
+    std::set<unsigned> eidSet;
+    std::stack<basic_block> nodeStack;
+
+    nodeStack.push(br);
+
+    while (!nodeStack.empty()) {
+        basic_block node = nodeStack.top();
+        nodeStack.pop();
+
+        std::queue<edge> succs;
+        FOR_EACH_EDGE(e, ei, node->succs)
+            succs.push(e);
+
+        while (succs.size() > 0) {
+            e = succs.front();
+            succs.pop();
+            if (m.count(e->dest) == 0) {
+                // skip this bb and get succs!
+                FOR_EACH_EDGE(es, esi, e->dest->succs) {
+                    succs.push(es);
+                }
+                continue;
+
+            } else if (m.count(node) == 0) {
+                nodeStack.push(e->dest);
+            } else {
+                unsigned eid = (m[node] >> 1) ^ m[e->dest];
+                if (eidSet.count(eid) == 0) {
+                    eidSet.insert(eid);
+                    //OKF("    Has edge %02u -> %02u", m[root], m[e->dest]);
+                    cnt++;
+                }
+                nodeStack.push(e->dest);
+            }
+        }
+    }
+
+    return cnt;
+  }
+
+#if 0
+  int count_edge_from_block(std::map<basic_block, unsigned> &m,
+          std::set<unsigned> &eidSet,
+          basic_block br) {
+    int cnt = 0;
+    edge          e, es;
+    edge_iterator ei, esi;
+
+    std::queue<edge> succs;
+    FOR_EACH_EDGE(e, ei, br->succs)
+        succs.push(e);
+
+    while (!succs.empty()) {
+        edge e = succs.front();
+        succs.pop();
+
+        if (m.count(e->dest) == 0) {
+            // skip this bb and get succs!
+            FOR_EACH_EDGE(es, esi, e->dest->succs) {
+                succs.push(es);
+            }
+            continue;
+        } else if (m.count(br) == 0) {
+            cnt += count_edge_from_block(m, eidSet, e->dest);
+        } else {
+            unsigned eid = (m[br] >> 1) ^ m[e->dest];
+            if (eidSet.count(eid) == 0) {
+                eidSet.insert(eid);
+                // OKF("    Has edge %02u -> %02u", m[root], m[e->dest]);
+                cnt++;
+            }
+            cnt += count_edge_from_block(m, eidSet, e->dest);
+        }
+    }
+
+    return cnt;
+  }
+#endif
 
   /* Create and return a declaration for the __afl_trace rt function.  */
   static inline tree get_afl_trace_decl() {
@@ -444,8 +581,8 @@ struct afl_pass : afl_base_pass {
       if (!self.inst_blocks)
         WARNF("No instrumentation targets found.");
       else
-        OKF("Instrumented %u locations (%s mode, %s, ratio %u%%).",
-            self.inst_blocks,
+        OKF("Instrumented %u blocks and %u edges (%s mode, %s, ratio %u%%).",
+            self.inst_blocks, self.inst_edges,
             getenv("AFL_HARDEN") ? G_("hardened") : G_("non-hardened"),
             self.out_of_line ? G_("out of line") : G_("inline"),
             self.inst_ratio);

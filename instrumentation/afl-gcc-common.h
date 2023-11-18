@@ -36,6 +36,10 @@
   #undef unlikely
 #endif
 
+#include <map>
+#include <set>
+#include <stack>
+#include <queue>
 #include <list>
 #include <string>
 #include <fstream>
