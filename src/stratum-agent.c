@@ -68,7 +68,9 @@ static u8 *in_dir = NULL,              /* input folder                      */
     *out_file = NULL, *at_file = NULL;        /* Substitution string for @@ */
 
 static u8 *cov_file = NULL;
+static u8 *map_size_file = NULL;
 static s32 cov_fd = 0;
+static s32 map_size_fd = 0;
 
 static u8 outfile[PATH_MAX];
 
@@ -177,12 +179,10 @@ static void dump_coverage() {
   // dump coverage
   printf("dump trace_bits to %s (%d)\n", cov_file, cov_fd);
   if (cov_fd > 0) {
-      /* FIXME: doesn't work!! */
       lseek(cov_fd, 0, SEEK_SET);
       ck_write(cov_fd, fsrv->trace_bits, map_size, cov_file);
       fsync(cov_fd);
   }
-
 
   u32 t_bytes = count_bytes_in_trace(fsrv);
   double t_byte_ratio = ((double)t_bytes * 100) / fsrv->real_map_size;
@@ -977,7 +977,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   if (getenv("AFL_QUIET") != NULL) { be_quiet = true; }
 
-  while ((opt = getopt(argc, argv, "+i:o:g:f:m:t:AeqCZOH:QUWbcrsh")) > 0) {
+  while ((opt = getopt(argc, argv, "+i:o:g:z:f:m:t:AeqCZOH:QUWbcrsh")) > 0) {
 
     switch (opt) {
 
@@ -1003,6 +1003,10 @@ int main(int argc, char **argv_orig, char **envp) {
 
       case 'g':
         cov_file = optarg;
+        break;
+
+      case 'z':
+        map_size_file = optarg;
         break;
 
       case 'm': {
@@ -1403,6 +1407,14 @@ int main(int argc, char **argv_orig, char **envp) {
 
   if (cov_file != NULL) {
     cov_fd = open(cov_file, O_RDWR | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
+  }
+
+  if (map_size_file != NULL) {
+    map_size_fd = open(map_size_file, O_RDWR | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
+    FILE *f = fdopen(map_size_fd, "w");
+    fprintf(f, "%u\n", map_size);
+    fclose(f);
+    close(map_size_fd);
   }
 
   if (in_dir) {
