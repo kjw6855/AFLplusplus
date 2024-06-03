@@ -196,6 +196,19 @@ in the specified file.
 For more information, see
 [instrumentation/README.instrument_list.md](../instrumentation/README.instrument_list.md).
 
+#### INJECTIONS
+
+This feature is able to find simple injection vulnerabilities in insecure
+calls to mysql/mariadb/nosql/postgresql/ldap and XSS in libxml2.
+
+  - Setting `AFL_LLVM_INJECTIONS_ALL` will enable all injection hooking
+
+  - Setting `AFL_LLVM_INJECTIONS_SQL` will enable SQL injection hooking
+
+  - Setting `AFL_LLVM_INJECTIONS_LDAP` will enable LDAP injection hooking
+
+  - Setting `AFL_LLVM_INJECTIONS_XSS` will enable XSS injection hooking
+
 #### LAF-INTEL
 
 This great feature will split compares into series of single byte comparisons to
@@ -235,6 +248,9 @@ use (which only ever the author of this LTO implementation will use). These are
 used if several separated instrumentations are performed which are then later
 combined.
 
+  - `AFL_LLVM_LTO_CALLER` activates collision free CALLER instrumentation
+  - `AFL_LLVM_LTO_CALLER` sets the maximum mumber of single block functions
+    to dig deeper into a real function. Default 0.
   - `AFL_LLVM_DOCUMENT_IDS=file` will document to a file which edge ID was given
     to which function. This helps to identify functions with variable bytes or
     which functions were touched by an input.
@@ -364,6 +380,9 @@ checks or alter some of the more exotic semantics of the tool:
 
   - Setting `AFL_DISABLE_TRIM` tells afl-fuzz not to trim test cases. This is
     usually a bad idea!
+
+  - Setting `AFL_DISABLE_REDUNDANT` disables any queue items that are redundant.
+    This can be useful with huge queues.
 
   - Setting `AFL_KEEP_TIMEOUTS` will keep longer running inputs if they reach
     new coverage
@@ -530,6 +549,9 @@ checks or alter some of the more exotic semantics of the tool:
     prepending `afl-qemu-trace` to your command line. Use this if you wish to
     use a custom afl-qemu-trace or if you need to modify the afl-qemu-trace
     arguments.
+
+  - `AFL_SHA1_FILENAMES` causes AFL++ to generate files named by the SHA1 hash
+    of their contents, rather than use the standard `id:000000,...` names.
 
   - `AFL_SHUFFLE_QUEUE` randomly reorders the input queue on startup. Requested
     by some users for unorthodox parallelized fuzzing setups, but not advisable

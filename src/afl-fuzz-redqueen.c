@@ -7,7 +7,7 @@
    Forkserver design by Jann Horn <jannhorn@googlemail.com>
 
    Now maintained by by Marc Heuse <mh@mh-sec.de>,
-                        Heiko Eißfeldt <heiko.eissfeldt@hexco.de> and
+                        Heiko Eissfeldt <heiko.eissfeldt@hexco.de> and
                         Andrea Fioraldi <andreafioraldi@gmail.com>
 
    Copyright 2016, 2017 Google Inc. All rights reserved.
@@ -29,6 +29,7 @@
 #include "cmplog.h"
 
 // #define _DEBUG
+// #define USE_HASHMAP
 // #define CMPLOG_INTROSPECTION
 
 // CMP attribute enum
@@ -86,6 +87,13 @@ struct range {
 static u32 hshape;
 static u64 screen_update;
 static u64 last_update;
+
+#ifdef USE_HASHMAP
+// hashmap functions
+void hashmap_reset();
+bool hashmap_search_and_add(uint8_t type, uint64_t key);
+bool hashmap_search_and_add_ptr(uint8_t type, u8 *key);
+#endif
 
 static struct range *add_range(struct range *ranges, u32 start, u32 end) {
 
@@ -795,7 +803,7 @@ static u8 cmp_extend_encoding(afl_state_t *afl, struct cmp_header *h,
   u64 *o_buf_64 = (u64 *)&orig_buf[idx];
   u32 *o_buf_32 = (u32 *)&orig_buf[idx];
   u16 *o_buf_16 = (u16 *)&orig_buf[idx];
-  u8  *o_buf_8 = &orig_buf[idx];
+  // u8  *o_buf_8 = &orig_buf[idx];
 
   u32 its_len = MIN(len - idx, taint_len);
 
@@ -836,6 +844,7 @@ static u8 cmp_extend_encoding(afl_state_t *afl, struct cmp_header *h,
 
   // necessary for preventing heap access overflow
   bytes = MIN(bytes, len - idx);
+  if (unlikely(bytes <= 1)) { return 0; }
 
   //  reverse atoi()/strnu?toll() is expensive, so we only to it in lvl 3
   if (afl->cmplog_enable_transform && (lvl & LVL3)) {
@@ -1266,6 +1275,7 @@ static u8 cmp_extend_encoding(afl_state_t *afl, struct cmp_header *h,
 
     }
 
+    /*
     if (*status != 1) {  // u8
 
       // if (its_len >= 1)
@@ -1289,6 +1299,8 @@ static u8 cmp_extend_encoding(afl_state_t *afl, struct cmp_header *h,
       }
 
     }
+
+    */
 
   }
 
@@ -1321,7 +1333,7 @@ static u8 cmp_extend_encoding(afl_state_t *afl, struct cmp_header *h,
     } else {
 
 #ifndef WORD_SIZE_64
-      if (repl <= 0x00ffffffffffffff {
+      if (repl <= 0x00ffffffffffffff) {
 
         new_val = repl << 8;
         u8  scale_len = 0;
@@ -1379,7 +1391,7 @@ static u8 cmp_extend_encoding(afl_state_t *afl, struct cmp_header *h,
         new_vall += (scale_len << 2) + 3;
         ilen = scale_len + 5;
 
-        if (ilen <= its_len) {
+        if (ilen <= its_len && ilen > 1) {
 
           u8 tmpbuf[32];
           memcpy(tmpbuf, buf + idx, ilen);
@@ -1403,7 +1415,7 @@ static u8 cmp_extend_encoding(afl_state_t *afl, struct cmp_header *h,
 
     if (do_call) {
 
-      if (ilen <= its_len) {
+      if (ilen <= its_len && ilen > 1) {
 
         u8 tmpbuf[32];
         memcpy(tmpbuf, buf + idx, ilen);
@@ -1421,7 +1433,7 @@ static u8 cmp_extend_encoding(afl_state_t *afl, struct cmp_header *h,
 
   }
 
-  // here we add and subract 1 from the value, but only if it is not an
+  // here we add and subtract 1 from the value, but only if it is not an
   // == or != comparison
   // Bits: 1 = Equal, 2 = Greater, 4 = Lesser, 8 = Float
   //       16 = modified float, 32 = modified integer (modified = wont match
@@ -1881,6 +1893,8 @@ static u8 cmp_fuzz(afl_state_t *afl, u32 key, u8 *orig_buf, u8 *buf, u8 *cbuf,
 
   hshape = SHAPE_BYTES(h->shape);
 
+  if (hshape < 2) { return 0; }
+
   if (h->hits > CMP_MAP_H) {
 
     loggeds = CMP_MAP_H;
@@ -1942,6 +1956,19 @@ static u8 cmp_fuzz(afl_state_t *afl, u32 key, u8 *orig_buf, u8 *buf, u8 *cbuf,
       }
 
     }
+
+#ifdef USE_HASHMAP
+    // TODO: add attribute? not sure
+    if (hshape <= 8 && hashmap_search_and_add(hshape - 1, o->v0) &&
+        hashmap_search_and_add(hshape - 1, orig_o->v0) &&
+        hashmap_search_and_add(hshape - 1, o->v1) &&
+        hashmap_search_and_add(hshape - 1, orig_o->v1)) {
+
+      continue;
+
+    }
+
+#endif
 
 #ifdef _DEBUG
     fprintf(stderr, "Handling: %llx->%llx vs %llx->%llx attr=%u shape=%u\n",
@@ -2217,15 +2244,15 @@ static u8 rtn_extend_encoding(afl_state_t *afl, u8 entry,
 
   }
 
-  if (l0 == 0 || l1 == 0 || ol0 == 0 || ol1 == 0 || l0 > 31 || l1 > 31 ||
-      ol0 > 31 || ol1 > 31) {
+  if (l0 == 0 || l1 == 0 || ol0 == 0 || ol1 == 0 || l0 > 32 || l1 > 32 ||
+      ol0 > 32 || ol1 > 32) {
 
     l0 = ol0 = hshape;
 
   }
 
   u8  lmax = MAX(l0, ol0);
-  u8  save[40];
+  u8  save[80];
   u32 saved_idx = idx, pre, from = 0, to = 0, i, j;
   u32 its_len = MIN(MIN(lmax, hshape), len - idx);
   its_len = MIN(its_len, taint_len);
@@ -2328,7 +2355,7 @@ static u8 rtn_extend_encoding(afl_state_t *afl, u8 entry,
     u32 tob64 = 0, fromb64 = 0;
     u32 from_0 = 0, from_x = 0, from_X = 0, from_slash = 0, from_up = 0;
     u32 to_0 = 0, to_x = 0, to_slash = 0, to_up = 0;
-    u8  xor_val[32], arith_val[32], tmp[48];
+    u8  xor_val[64], arith_val[64], tmp[64];
 
     idx = saved_idx;
     its_len = saved_its_len;
@@ -2613,12 +2640,13 @@ static u8 rtn_extend_encoding(afl_state_t *afl, u8 entry,
 
           }
 
-          memcpy(buf + idx, tmp, hlen + 1 + off);
+          u32 tmp_l = hlen + 1 + off;
+          memcpy(buf + idx, tmp, tmp_l);
           if (unlikely(its_fuzz(afl, buf, len, status))) { return 1; }
-          tmp[hlen + 1 + off] = 0;
+          tmp[tmp_l] = 0;
           // fprintf(stderr, "RTN ATTEMPT idx=%u len=%u fromhex %u %s %s result
           // %u\n", idx, len, fromhex, tmp, repl, *status);
-          memcpy(buf + idx, save, hlen + 1 + off);
+          memcpy(buf + idx, save, tmp_l);
 
         }
 
@@ -2698,6 +2726,8 @@ static u8 rtn_fuzz(afl_state_t *afl, u32 key, u8 *orig_buf, u8 *buf, u8 *cbuf,
 
   hshape = SHAPE_BYTES(h->shape);
 
+  if (hshape < 2) { return 0; }
+
   if (h->hits > CMP_MAP_RTN_H) {
 
     loggeds = CMP_MAP_RTN_H;
@@ -2734,21 +2764,33 @@ static u8 rtn_fuzz(afl_state_t *afl, u32 key, u8 *orig_buf, u8 *buf, u8 *cbuf,
 #ifdef _DEBUG
     u32                j;
     struct cmp_header *hh = &afl->orig_cmp_map->headers[key];
-    fprintf(stderr, "RTN N hits=%u id=%u shape=%u attr=%u v0=", h->hits, h->id,
-            hshape, h->attribute);
+    fprintf(stderr, "RTN N hits=%u shape=%u attr=%u v0=", h->hits, hshape,
+            h->attribute);
     for (j = 0; j < 8; j++)
       fprintf(stderr, "%02x", o->v0[j]);
     fprintf(stderr, " v1=");
     for (j = 0; j < 8; j++)
       fprintf(stderr, "%02x", o->v1[j]);
-    fprintf(stderr, "\nRTN O hits=%u id=%u shape=%u attr=%u o0=", hh->hits,
-            hh->id, hshape, hh->attribute);
+    fprintf(stderr, "\nRTN O hits=%u shape=%u attr=%u o0=", hh->hits, hshape,
+            hh->attribute);
     for (j = 0; j < 8; j++)
       fprintf(stderr, "%02x", orig_o->v0[j]);
     fprintf(stderr, " o1=");
     for (j = 0; j < 8; j++)
       fprintf(stderr, "%02x", orig_o->v1[j]);
     fprintf(stderr, "\n");
+#endif
+
+#ifdef USE_HASHMAP
+    if (hshape <= 8 && hashmap_search_and_add_ptr(hshape - 1, o->v0) &&
+        hashmap_search_and_add_ptr(hshape - 1, orig_o->v0) &&
+        hashmap_search_and_add_ptr(hshape - 1, o->v1) &&
+        hashmap_search_and_add_ptr(hshape - 1, orig_o->v1)) {
+
+      continue;
+
+    }
+
 #endif
 
     t = taint;
@@ -3016,6 +3058,10 @@ u8 input_to_state_stage(afl_state_t *afl, u8 *orig_buf, u8 *buf, u32 len) {
 #endif
 
   // Start insertion loop
+
+#ifdef USE_HASHMAP
+  hashmap_reset();
+#endif
 
   u64 orig_hit_cnt, new_hit_cnt;
   u64 orig_execs = afl->fsrv.total_execs;

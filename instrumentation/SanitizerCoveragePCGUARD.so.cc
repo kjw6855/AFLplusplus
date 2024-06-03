@@ -195,7 +195,7 @@ class ModuleSanitizerCoverageAFL
 
   SanitizerCoverageOptions Options;
 
-  uint32_t        instr = 0, selects = 0, unhandled = 0;
+  uint32_t        instr = 0, selects = 0, unhandled = 0, dump_cc = 0;
   GlobalVariable *AFLMapPtr = NULL;
   ConstantInt    *One = NULL;
   ConstantInt    *Zero = NULL;
@@ -329,6 +329,8 @@ bool ModuleSanitizerCoverageAFL::instrumentModule(
   setvbuf(stdout, NULL, _IONBF, 0);
 
   if (getenv("AFL_DEBUG")) { debug = 1; }
+
+  if (getenv("AFL_DUMP_CYCLOMATIC_COMPLEXITY")) { dump_cc = 1; }
 
   if ((isatty(2) && !getenv("AFL_QUIET")) || debug) {
 
@@ -572,7 +574,11 @@ void ModuleSanitizerCoverageAFL::instrumentFunction(
   if (!isInInstrumentList(&F, FMNAME)) return;
   if (F.getName().find(".module_ctor") != std::string::npos)
     return;  // Should not instrument sanitizer init functions.
+#if LLVM_VERSION_MAJOR >= 18
+  if (F.getName().starts_with("__sanitizer_"))
+#else
   if (F.getName().startswith("__sanitizer_"))
+#endif
     return;  // Don't instrument __sanitizer_* callbacks.
   // Don't touch available_externally functions, their actual body is elewhere.
   if (F.getLinkage() == GlobalValue::AvailableExternallyLinkage) return;
@@ -623,9 +629,18 @@ void ModuleSanitizerCoverageAFL::instrumentFunction(
 
   }
 
+  if (debug) {
+
+    fprintf(stderr, "SanitizerCoveragePCGUARD: instrumenting %s in %s\n",
+            F.getName().str().c_str(), F.getParent()->getName().str().c_str());
+
+  }
+
   InjectCoverage(F, BlocksToInstrument, IsLeafFunc);
   // InjectTraceForCmp(F, CmpTraceTargets);
   // InjectTraceForSwitch(F, SwitchTraceTargets);
+
+  if (dump_cc) { calcCyclomaticComplexity(&F); }
 
 }
 
@@ -948,6 +963,7 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
 #endif
         {
 
+          // fprintf(stderr, "UNHANDLED: %u\n", t->getTypeID());
           unhandled++;
           continue;
 

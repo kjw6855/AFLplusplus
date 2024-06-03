@@ -21,7 +21,10 @@ training, then we can highly recommend the following:
 
 * [https://github.com/antonio-morales/Fuzzing101](https://github.com/antonio-morales/Fuzzing101)
 
-Here is a good forkflow description (and tutorial) for qemu_mode:
+A good workflow overview (like our [fuzzing_in_depth.md](fuzzing_in_depth.md)):
+* [https://appsec.guide/docs/fuzzing/c-cpp/aflpp/](https://appsec.guide/docs/fuzzing/c-cpp/aflpp/)
+
+Here is a good workflow description (and tutorial) for qemu_mode:
 
 * [https://airbus-seclab.github.io/AFLplusplus-blogpost/](https://airbus-seclab.github.io/AFLplusplus-blogpost/)
 
@@ -40,6 +43,9 @@ structure is), these links have you covered (some are outdated though):
   [https://github.com/thebabush/afl-libprotobuf-mutator](https://github.com/thebabush/afl-libprotobuf-mutator)
 * Superion for AFL++:
   [https://github.com/adrian-rt/superion-mutator](https://github.com/adrian-rt/superion-mutator)
+
+For a very in-depth explanation on how AFL++ works check out:
+[https://blog.ritsec.club/posts/afl-under-hood/](https://blog.ritsec.club/posts/afl-under-hood/)
 
 ## Video Tutorials
 

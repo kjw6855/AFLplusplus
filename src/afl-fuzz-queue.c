@@ -5,11 +5,11 @@
    Originally written by Michal Zalewski
 
    Now maintained by Marc Heuse <mh@mh-sec.de>,
-                        Heiko Eißfeldt <heiko.eissfeldt@hexco.de> and
+                        Heiko Eissfeldt <heiko.eissfeldt@hexco.de> and
                         Andrea Fioraldi <andreafioraldi@gmail.com>
 
    Copyright 2016, 2017 Google Inc. All rights reserved.
-   Copyright 2019-2023 AFLplusplus Project. All rights reserved.
+   Copyright 2019-2024 AFLplusplus Project. All rights reserved.
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
    You may obtain a copy of the License at:
@@ -370,9 +370,9 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
 
     s32 fd;
 
-    fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
-    if (fd < 0) { PFATAL("Unable to create '%s'", fn); }
-    close(fd);
+    if (unlikely(afl->afl_env.afl_disable_redundant)) { q->disabled = 1; }
+    fd = permissive_create(afl, fn);
+    if (fd >= 0) { close(fd); }
 
   } else {
 
@@ -664,6 +664,8 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
 
   }
 
+  q->skipdet_e = (struct skipdet_entry *)ck_alloc(sizeof(struct skipdet_entry));
+
 }
 
 /* Destroy the entire queue. */
@@ -679,6 +681,15 @@ void destroy_queue(afl_state_t *afl) {
     q = afl->queue_buf[i];
     ck_free(q->fname);
     ck_free(q->trace_mini);
+    if (q->skipdet_e) {
+
+      if (q->skipdet_e->done_inf_map) ck_free(q->skipdet_e->done_inf_map);
+      if (q->skipdet_e->skip_eff_map) ck_free(q->skipdet_e->skip_eff_map);
+
+      ck_free(q->skipdet_e);
+
+    }
+
     ck_free(q);
 
   }
@@ -1290,7 +1301,8 @@ inline u8 *queue_testcase_get(afl_state_t *afl, struct queue_entry *q) {
     static u32 do_once = 0;  // because even threaded we would want this. WIP
 
     while (unlikely(
-        afl->q_testcase_cache_size + len >= afl->q_testcase_max_cache_size ||
+        (afl->q_testcase_cache_size + len >= afl->q_testcase_max_cache_size &&
+         afl->q_testcase_cache_count > 1) ||
         afl->q_testcase_cache_count >= afl->q_testcase_max_cache_entries - 1)) {
 
       /* We want a max number of entries to the cache that we learn.
